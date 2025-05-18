@@ -1,0 +1,313 @@
+помоги как уменьшить этот скрипт local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UIS = game:GetService("UserInputService")
+local player = Players.LocalPlayer
+
+-- GUI --
+local screenGui = Instance.new("ScreenGui", player:WaitForChild("PlayerGui"))
+screenGui.Name = "CombinedControlGui"
+screenGui.ResetOnSpawn = false
+
+-- Вращение --
+local rotateEnabled = true
+local rotationSpeed = 25
+
+local rotateButton = Instance.new("TextButton")
+rotateButton.Size = UDim2.new(0, 200, 0, 50)
+rotateButton.Position = UDim2.new(0.5, -310, 0.8, 0)
+rotateButton.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+rotateButton.TextColor3 = Color3.new(1, 1, 1)
+rotateButton.Text = "Отключить вращение"
+rotateButton.Font = Enum.Font.SourceSansBold
+rotateButton.TextSize = 20
+rotateButton.Parent = screenGui
+
+local sliderFrame = Instance.new("Frame")
+sliderFrame.Size = UDim2.new(0, 200, 0, 40)
+sliderFrame.Position = UDim2.new(0.5, -310, 0.9, 0)
+sliderFrame.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+sliderFrame.Parent = screenGui
+
+local bar = Instance.new("Frame")
+bar.Size = UDim2.new(1, -10, 0, 10)
+bar.Position = UDim2.new(0, 5, 0.5, -5)
+bar.BackgroundColor3 = Color3.fromRGB(100, 100, 100)
+bar.Parent = sliderFrame
+
+local knob = Instance.new("Frame")
+knob.Size = UDim2.new(0, 10, 0, 20)
+knob.Position = UDim2.new(0.5, -5, 0.5, -10)
+knob.BackgroundColor3 = Color3.fromRGB(255, 0, 0)
+knob.Parent = sliderFrame
+
+local speedLabel = Instance.new("TextLabel")
+speedLabel.Size = UDim2.new(0, 200, 0, 20)
+speedLabel.Position = UDim2.new(0.5, -310, 0.95, 0)
+speedLabel.TextColor3 = Color3.new(1, 1, 1)
+speedLabel.BackgroundTransparency = 1
+speedLabel.Text = "Скорость: 25"
+speedLabel.Font = Enum.Font.SourceSans
+speedLabel.TextSize = 18
+speedLabel.Parent = screenGui
+
+-- Хаос --
+local ragdolling = false
+local chaosConnection = nil
+local spinConnection = nil
+local humanoid = nil
+local root = nil
+
+local chaosButton = Instance.new("TextButton")
+chaosButton.Size = UDim2.new(0, 220, 0, 50)
+chaosButton.Position = UDim2.new(0.5, 90, 0.8, 0)
+chaosButton.BackgroundColor3 = Color3.fromRGB(100, 0, 0)
+chaosButton.TextColor3 = Color3.new(1, 1, 1)
+chaosButton.Text = "АКТИВИРОВАТЬ ХАОС"
+chaosButton.Font = Enum.Font.SourceSansBold
+chaosButton.TextSize = 20
+chaosButton.Parent = screenGui
+
+local function startChaosWithSpin()
+	local char = player.Character
+	if not char then return end
+
+	humanoid = char:FindFirstChild("Humanoid")
+	root = char:FindFirstChild("HumanoidRootPart")
+	if not humanoid or not root then return end
+
+	ragdolling = true
+	humanoid:ChangeState(Enum.HumanoidStateType.Physics)
+
+	chaosConnection = RunService.RenderStepped:Connect(function()
+		if not ragdolling then return end
+		if humanoid:GetState() == Enum.HumanoidStateType.GettingUp or
+		   humanoid:GetState() == Enum.HumanoidStateType.Running then
+			humanoid:ChangeState(Enum.HumanoidStateType.Physics)
+		end
+		for _, part in ipairs(char:GetDescendants()) do
+			if part:IsA("BasePart") and part ~= root then
+				part.Velocity = Vector3.new(
+					math.random(-120, 120),
+					0,
+					math.random(-30, 30)
+				)
+			end
+		end
+	end)
+
+	spinConnection = RunService.RenderStepped:Connect(function()
+		if ragdolling and root then
+			root.CFrame = root.CFrame * CFrame.Angles(0, math.rad(25), 0)
+		end
+	end)
+end
+
+local function stopChaosWithSpin()
+	ragdolling = false
+	if chaosConnection then chaosConnection:Disconnect() chaosConnection = nil end
+	if spinConnection then spinConnection:Disconnect() spinConnection = nil end
+	if humanoid then humanoid:ChangeState(Enum.HumanoidStateType.GettingUp) end
+end
+
+chaosButton.MouseButton1Click:Connect(function()
+	if ragdolling then
+		stopChaosWithSpin()
+		chaosButton.Text = "АКТИВИРОВАТЬ ХАОС"
+	else
+		if isReversing then return end -- не включать хаос во время реверса
+		startChaosWithSpin()
+		chaosButton.Text = "ОСТАНОВИТЬ ХАОС"
+	end
+end)
+
+-- Реверс движения с анимациями --
+local history = {}
+local maxHistoryTime = 5
+local recordInterval = 0.1
+local maxRecords = math.floor(maxHistoryTime / recordInterval)
+
+local isReversing = false
+local elapsed = 0
+local reverseTimeElapsed = 0
+
+local animator = nil
+local humanoid = nil
+local root = nil
+
+local reverseButton = Instance.new("TextButton")
+reverseButton.Size = UDim2.new(0, 150, 0, 50)
+reverseButton.Position = UDim2.new(0.5, -75, 0.8, -60)
+reverseButton.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+reverseButton.TextColor3 = Color3.new(1, 1, 1)
+reverseButton.Font = Enum.Font.SourceSansBold
+reverseButton.TextSize = 24
+reverseButton.Text = "Реверс: ВЫКЛ"
+reverseButton.Parent = screenGui
+
+local function getCurrentAnimationTrack()
+	if not animator then return nil end
+	local tracks = animator:GetPlayingAnimationTracks()
+	if #tracks == 0 then return nil end
+	table.sort(tracks, function(a,b) return a.TimePosition > b.TimePosition end)
+	return tracks[1]
+end
+
+local function recordState()
+	if not root then return end
+	local animTrack = getCurrentAnimationTrack()
+	local animName = nil
+	local animTime = 0
+	if animTrack then
+		animName = animTrack.Animation.AnimationId
+		animTime = animTrack.TimePosition
+	end
+
+	table.insert(history, {
+		cframe = root.CFrame,
+		animId = animName,
+		animTime = animTime,
+	})
+	if #history > maxRecords then
+		table.remove(history, 1)
+	end
+end
+
+local currentReverseTrack = nil
+
+local function playReverse(dt)
+	if #history < 2 or not root then return end
+
+	reverseTimeElapsed = reverseTimeElapsed + dt
+	if reverseTimeElapsed > maxHistoryTime then
+		reverseTimeElapsed = maxHistoryTime
+	end
+
+	local totalFrames = #history
+	local positionInFrames = totalFrames - (reverseTimeElapsed / recordInterval)
+	positionInFrames = math.clamp(positionInFrames, 1, totalFrames)
+
+	local idx1 = math.floor(positionInFrames)
+	local idx2 = math.ceil(positionInFrames)
+	local alpha = positionInFrames - idx1
+
+	local state1 = history[idx1]
+	local state2 = history[idx2]
+
+	if not state1 or not state2 then return end
+
+	-- Плавная интерполяция позиции
+	root.CFrame = state1.cframe:Lerp(state2.cframe, alpha)
+
+	-- Управление анимацией
+	if animator then
+		if state1.animId ~= (currentReverseTrack and currentReverseTrack.Animation.AnimationId) then
+			if currentReverseTrack then
+				currentReverseTrack:Stop(0.2)
+				currentReverseTrack = nil
+			end
+			if state1.animId then
+				local anim = Instance.new("Animation")
+				anim.AnimationId = state1.animId
+				currentReverseTrack = animator:LoadAnimation(anim)
+				currentReverseTrack:Play(0.2)
+			end
+		end
+		if currentReverseTrack then
+			local targetTime = state1.animTime + (state2.animTime - state1.animTime) * alpha
+			currentReverseTrack.TimePosition = targetTime
+		end
+	end
+end
+
+RunService.Heartbeat:Connect(function(dt)
+	local char = player.Character
+	if not char then return end
+
+	root = char:FindFirstChild("HumanoidRootPart")
+	humanoid = char:FindFirstChildWhichIsA("Humanoid")
+	if humanoid and not animator then
+		animator = humanoid:FindFirstChildOfClass("Animator")
+		if not animator then
+			animator = Instance.new("Animator")
+			animator.Parent = humanoid
+		end
+	end
+
+	if not root or not humanoid then return end
+
+	if isReversing then
+		playReverse(dt)
+	else
+		elapsed = elapsed + dt
+		if elapsed >= recordInterval then
+			elapsed = 0
+			recordState()
+		end
+		-- Вращение работает только если реверс выключен
+		if rotateEnabled then
+			root.CFrame = root.CFrame * CFrame.Angles(0, math.rad(rotationSpeed), 0)
+		end
+	end
+end)
+
+rotateButton.MouseButton1Click:Connect(function()
+	if isReversing then return end -- нельзя крутить во время реверса
+	rotateEnabled = not rotateEnabled
+	rotateButton.Text = rotateEnabled and "Отключить вращение" or "Включить вращение"
+end)
+
+local dragging = false
+knob.InputBegan:Connect(function(input)
+	if input.UserInputType == Enum.UserInputType.MouseButton1 then
+		dragging = true
+	end
+end)
+
+UIS.InputEnded:Connect(function(input)
+	if input.UserInputType == Enum.UserInputType.MouseButton1 then
+		dragging = false
+	end
+end)
+
+UIS.InputChanged:Connect(function(input)
+	if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
+		local mouseX = input.Position.X
+		local relativeX = math.clamp(mouseX - bar.AbsolutePosition.X, 0, bar.AbsoluteSize.X)
+		local percent = relativeX / bar.AbsoluteSize.X
+		knob.Position = UDim2.new(0, relativeX - knob.AbsoluteSize.X/2, 0.5, -10)
+		rotationSpeed = math.floor(percent * 100)
+		speedLabel.Text = "Скорость: " .. rotationSpeed
+	end
+end)
+
+reverseButton.MouseButton1Click:Connect(function()
+	if ragdolling then
+		stopChaosWithSpin()
+		chaosButton.Text = "АКТИВИРОВАТЬ ХАОС"
+	end
+
+	isReversing = not isReversing
+	if isReversing then
+		reverseButton.Text = "Реверс: ВКЛ"
+		reverseTimeElapsed = 0
+		rotateEnabled = false
+		rotateButton.Text = "Вращение отключено"
+	else
+		reverseButton.Text = "Реверс: ВЫКЛ"
+		history = {}
+		elapsed = 0
+		if currentReverseTrack then
+			currentReverseTrack:Stop(0.2)
+			currentReverseTrack = nil
+		end
+		rotateButton.Text = rotateEnabled and "Отключить вращение" or "Включить вращение"
+	end
+end)
+
+-- Горячая клавиша V для скрытия/показа GUI
+UIS.InputBegan:Connect(function(input, gameProcessed)
+	if gameProcessed then return end
+	if input.KeyCode == Enum.KeyCode.V then
+		screenGui.Enabled = not screenGui.Enabled
+	end
+end)
